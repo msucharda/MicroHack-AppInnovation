@@ -4,6 +4,15 @@ resource "azurerm_subnet" "app_subnet" {
   resource_group_name  = data.azurerm_resource_group.main_rg.name
   virtual_network_name = data.azurerm_virtual_network.main_vnet.name
   address_prefixes     = ["10.22.1.64/26"]
+
+  delegation {
+    name = "delegation-to-containerapps"
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+
 }
 
 resource "azurerm_subnet" "db_subnet" {
@@ -27,7 +36,34 @@ resource "azurerm_mssql_server" "sql_server" {
 resource "azurerm_mssql_database" "sql_database" {
   name           = "sqldbazgwc"
   server_id      = azurerm_mssql_server.sql_server.id
-  sku_name       = "S0"
+  sku_name       = "GP_S_Gen5_1"
   max_size_gb    = 10
   zone_redundant = false
+}
+
+#log analytics workspace
+resource "azurerm_log_analytics_workspace" "main_workspace" {
+  name                = "law-azgwc"
+  location            = "Germany West Central"
+  resource_group_name = data.azurerm_resource_group.main_rg.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+
+#container apps environment deployed to vnet
+resource "azurerm_container_app_environment" "main_env" {
+  name                = "env-azgwc"
+  location            = "Germany West Central"
+  resource_group_name = data.azurerm_resource_group.main_rg.name
+
+  logs_destination           = "log-analytics"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.main_workspace.id
+  infrastructure_subnet_id   = azurerm_subnet.app_subnet.id
+  workload_profile {
+    name                  = "cpu-profile"
+    workload_profile_type = "Consumption"
+    maximum_count         = 1
+    minimum_count         = 0
+  }
 }
