@@ -41,6 +41,21 @@ resource "azurerm_mssql_database" "sql_database" {
   zone_redundant = false
 }
 
+#private dns zone for mssql
+
+resource "azurerm_private_dns_zone" "mssql_private_dns" {
+  name                = "privatelink.database.windows.net"
+  resource_group_name = data.azurerm_resource_group.main_rg.name
+}
+
+#link vnet to private dns for mssql
+resource "azurerm_private_dns_zone_virtual_network_link" "mssql_dns_vnet_link" {
+  name                  = "link-mssql-azgwc"
+  resource_group_name   = data.azurerm_resource_group.main_rg.name
+  private_dns_zone_name = azurerm_private_dns_zone.mssql_private_dns.name
+  virtual_network_id    = data.azurerm_virtual_network.main_vnet.id
+}
+
 #log analytics workspace
 resource "azurerm_log_analytics_workspace" "main_workspace" {
   name                = "law-azgwc"
@@ -61,9 +76,48 @@ resource "azurerm_container_app_environment" "main_env" {
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main_workspace.id
   infrastructure_subnet_id   = azurerm_subnet.app_subnet.id
   workload_profile {
-    name                  = "cpu-profile"
+    name                  = "Consumption"
     workload_profile_type = "Consumption"
     maximum_count         = 1
     minimum_count         = 0
+  }
+}
+
+#azure container registry
+resource "azurerm_container_registry" "main_acr" {
+  name                          = "acrAzgwc12345"
+  resource_group_name           = data.azurerm_resource_group.main_rg.name
+  location                      = "Germany West Central"
+  sku                           = "Basic"
+  admin_enabled                 = true
+  public_network_access_enabled = false
+}
+
+#private dns for acr
+resource "azurerm_private_dns_zone" "acr_private_dns" {
+  name                = "privatelink.azurecr.io"
+  resource_group_name = data.azurerm_resource_group.main_rg.name
+}
+
+#link vnet to private dns for acr
+resource "azurerm_private_dns_zone_virtual_network_link" "acr_dns_vnet_link" {
+  name                  = "link-acr-azgwc"
+  resource_group_name   = data.azurerm_resource_group.main_rg.name
+  private_dns_zone_name = azurerm_private_dns_zone.acr_private_dns.name
+  virtual_network_id    = data.azurerm_virtual_network.main_vnet.id
+}
+
+#private endpoint for acr
+resource "azurerm_private_endpoint" "acr_private_endpoint" {
+  name                = "pe-acr-azgwc"
+  location            = "Germany West Central"
+  resource_group_name = data.azurerm_resource_group.main_rg.name
+  subnet_id           = azurerm_subnet.db_subnet.id
+
+  private_service_connection {
+    name                           = "psc-acr-azgwc"
+    private_connection_resource_id = azurerm_container_registry.main_acr.id
+    is_manual_connection           = false
+    subresource_names              = ["registry"]
   }
 }
